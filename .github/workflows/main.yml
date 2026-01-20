@@ -9,22 +9,34 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        # remove `ref:` unless you really have a branch called `source-code`
         with:
           ref: source-code
 
+      - name: Install prerequisites
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y build-essential unzip curl upx-ucl
+
       - name: grab ndk
         run: |
+          set -euo pipefail
           curl -L https://dl.google.com/android/repository/android-ndk-r27d-linux.zip -o ndk-linux.zip
           unzip ndk-linux.zip
+          ls -la android-ndk-r27d
 
       - name: grab zig
         run: |
+          set -euo pipefail
           curl -L https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz -o zig.tar.xz
           tar -xf zig.tar.xz
           mv zig-* zig
+          ls -la zig
 
       - name: grab sstrip from ELFkickers
         run: |
+          set -euo pipefail
           curl -L https://www.muppetlabs.com/~breadbox/pub/software/ELFkickers-3.2.tar.gz -o sstrip.tar.gz
           tar xf sstrip.tar.gz
           make -C ELFkickers-3.2 sstrip
@@ -32,36 +44,48 @@ jobs:
 
       - name: compile via zigcc
         run: |
+          set -euo pipefail
           ls -la ; pwd
           echo "for now only aarch64 is built"
           chmod +x sstrip
 
-          # Dynamically get all version directories (numeric directories only)
-          VERSION_DIRS=$(find . -maxdepth 1 -type d -name '[0-9]*' | sed 's|./||' | sort -n)
-          
+          # Dynamically get all version directories (only names that start with a digit)
+          VERSION_DIRS=$(find . -maxdepth 1 -type d -name '[0-9]*' -printf '%f\n' | sort -n)
+
           for i in $VERSION_DIRS; do
-            if [ $i -eq 156 ]; then
+            if [ "$i" -eq 156 ]; then
               mkdir -p binaries/$i/gki/
             else
               mkdir -p binaries/$i/gki/
               mkdir -p binaries/$i/non-gki/
             fi
           done
-          
+
+          # Set ndk sysroot path
+          NDK_SYSROOT=./android-ndk-r27d/toolchains/llvm/prebuilt/linux-x86_64/sysroot
+
           for i in $VERSION_DIRS; do
-            if [ $i -eq 156 ]; then
+            if [ "$i" -eq 156 ]; then
               # Compile GKI version
-              ./zig/zig cc -target aarch64-linux -s -Oz $i/gki/main.c -static -s -Wl,--gc-sections -o binaries/$i/gki/ksu_susfs_arm64 -I ./android-ndk-r27d/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include
+              ./zig/zig cc -target aarch64-linux -Oz "$i/gki/main.c" -static -Wl,--gc-sections --sysroot="$NDK_SYSROOT" -o "binaries/$i/gki/ksu_susfs_arm64"
             else
               # Compile GKI version
-              ./zig/zig cc -target aarch64-linux -s -Oz $i/gki/main.c -static -s -Wl,--gc-sections -o binaries/$i/gki/ksu_susfs_arm64 -I ./android-ndk-r27d/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include
+              ./zig/zig cc -target aarch64-linux -Oz "$i/gki/main.c" -static -Wl,--gc-sections --sysroot="$NDK_SYSROOT" -o "binaries/$i/gki/ksu_susfs_arm64"
               # Compile non-GKI version
-              ./zig/zig cc -target aarch64-linux -s -Oz $i/ngki/main.c -static -s -Wl,--gc-sections -o binaries/$i/non-gki/ksu_susfs_arm64 -I ./android-ndk-r27d/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include
+              ./zig/zig cc -target aarch64-linux -Oz "$i/ngki/main.c" -static -Wl,--gc-sections --sysroot="$NDK_SYSROOT" -o "binaries/$i/non-gki/ksu_susfs_arm64"
             fi
           done
 
-          upx --ultra-brute binaries/*/*/ksu_susfs_arm64
-          for i in binaries/*/*/ksu_susfs_arm64; do ./sstrip $i ; done;
+          # Compress and strip
+          find binaries -type f -name ksu_susfs_arm64 -print0 | xargs -0 upx --ultra-brute || true
+          for i in binaries/*/*/ksu_susfs_arm64; do
+            if [ -f "$i" ]; then
+              ./sstrip "$i" || true
+            fi
+          done
+
+          # Verify output
+          ls -R binaries || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
