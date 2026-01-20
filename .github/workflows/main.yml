@@ -62,7 +62,7 @@ jobs:
           done
 
           # Set ndk sysroot path
-          NDK_SYSROOT=./android-ndk-r27d/toolchains/llvm/prebuilt/linux-x86_64/sysroot
+          NDK_SYSROOT=./android-ndk-r27d/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include
 
           for i in $VERSION_DIRS; do
             if [ "$i" -eq 156 ]; then
