@@ -1,4 +1,4 @@
-name: build susfs_userspace
+name: build susfs_userspace (ndk)
 
 on:
   workflow_dispatch:
@@ -6,59 +6,77 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
           ref: source-code
 
-      - name: grab ndk
+      - name: Download Android NDK r27d
         run: |
-          curl -L https://dl.google.com/android/repository/android-ndk-r23b-linux.zip -o ndk-linux.zip
-          unzip ndk-linux.zip
-      - name: grab zig
-        run: |
-          curl -L https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz -o zig.tar.xz
-          tar -xf zig.tar.xz
-          mv zig-* zig
-      - name: grab sstrip from ELFkickers
+          curl -L https://dl.google.com/android/repository/android-ndk-r27d-linux.zip -o ndk.zip
+          unzip -q ndk.zip
+
+      - name: Build sstrip (ELFkickers)
         run: |
           curl -L https://www.muppetlabs.com/~breadbox/pub/software/ELFkickers-3.2.tar.gz -o sstrip.tar.gz
           tar xf sstrip.tar.gz
           make -C ELFkickers-3.2 sstrip
           cp ELFkickers-3.2/sstrip/sstrip .
-      - name: compile via zigcc
-        run: |
-          ls -la ; pwd
-          echo "for now only aarch64 is built"
           chmod +x sstrip
-          # Dynamically get all version directories (numeric directories only)
+
+      - name: Compile SusFS userspace (ARM64)
+        run: |
+          set -e
+
+          NDK=android-ndk-r27d/toolchains/llvm/prebuilt/linux-x86_64
+          CC=$NDK/bin/aarch64-linux-android21-clang
+
+          echo "Compiler:"
+          $CC --version
+
           VERSION_DIRS=$(find . -maxdepth 1 -type d -name '[0-9]*' | sed 's|./||' | sort -n)
-          
+
           for i in $VERSION_DIRS; do
-            if [ $i -eq 156 ]; then
-              mkdir -p binaries/$i/gki/
-            else
-              mkdir -p binaries/$i/gki/
-              mkdir -p binaries/$i/non-gki/
+            mkdir -p binaries/$i/gki
+            [ "$i" != "156" ] && mkdir -p binaries/$i/non-gki
+          done
+
+          for i in $VERSION_DIRS; do
+            echo "Building GKI for $i"
+
+            $CC \
+              -static \
+              -Oz \
+              -ffunction-sections \
+              -fdata-sections \
+              -Wl,--gc-sections \
+              $i/gki/main.c \
+              -o binaries/$i/gki/ksu_susfs_arm64
+
+            if [ "$i" != "156" ]; then
+              echo "Building non-GKI for $i"
+
+              $CC \
+                -static \
+                -Oz \
+                -ffunction-sections \
+                -fdata-sections \
+                -Wl,--gc-sections \
+                $i/ngki/main.c \
+                -o binaries/$i/non-gki/ksu_susfs_arm64
             fi
           done
-          
-          for i in $VERSION_DIRS; do
-            if [ $i -eq 156 ]; then
-              # Compile GKI version
-              ./zig/zig cc -target aarch64-linux -s -Oz $i/gki/main.c -static -s -Wl,--gc-sections -o binaries/$i/gki/ksu_susfs_arm64 -I ./android-ndk-r23b/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include
-            else
-              # Compile GKI version
-              ./zig/zig cc -target aarch64-linux -s -Oz $i/gki/main.c -static -s -Wl,--gc-sections -o binaries/$i/gki/ksu_susfs_arm64 -I ./android-ndk-r23b/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include
-              # Compile non-GKI version
-              ./zig/zig cc -target aarch64-linux -s -Oz $i/ngki/main.c -static -s -Wl,--gc-sections -o binaries/$i/non-gki/ksu_susfs_arm64 -I ./android-ndk-r23b/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include
-            fi
+
+      - name: Strip binaries
+        run: |
+          for f in binaries/*/*/ksu_susfs_arm64; do
+            ./sstrip "$f"
           done
-          upx --ultra-brute binaries/*/*/ksu_susfs_arm64
-          for i in binaries/*/*/ksu_susfs_arm64; do ./sstrip $i ; done;
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: susfs_binaries
+          name: susfs_binaries_ndk_arm64
           path: binaries/
