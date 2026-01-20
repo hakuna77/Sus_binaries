@@ -59,7 +59,6 @@ jobs:
               echo "Building non-GKI for $i"
 
               $CC \
-                -static \
                 -Oz \
                 -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIC -flto=thin \
                 -ffunction-sections \
