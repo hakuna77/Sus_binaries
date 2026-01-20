@@ -64,7 +64,7 @@ jobs:
                 -O3 -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIC -flto=thin \
                 -ffunction-sections \
                 -fdata-sections \
-                -fvisibility=hidden
+                -fvisibility=hidden \
                 -Wl,--gc-sections \
                 $i/ngki/main.c \
                 -o binaries/$i/non-gki/ksu_susfs_arm64
